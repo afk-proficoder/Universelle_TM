@@ -1,8 +1,20 @@
+import java.lang.reflect.Array;
 import java.util.*;
 
+/**
+ * Emuliert eine Universelle Turingmaschine, welche Turingmaschinen berechnet, die eine Multiplikation aus zwei
+ * positiven natürlichen Zahlen ausrechnet.
+ * Um grössere Multiplikationen zu ermöglichen, wird mit einem "subarray" gearbeitet.
+ * Diese Universelle Turingmaschine akzeptiert als Input unäre Faktoren zur Berrechnung des Produktes und als
+ * Multiplikationszeichen einen Underscore "_"
+ *
+ * @Author Pascal Kunz
+ */
 public class UTMEncoder
 {
     private final static int CENTER_INDEX_OF_BAND = 31;
+    private final static int START_OF_VIEW = 16;
+    private final static int END_OF_VIEW = 78;
     private final static String SEARCH_AT_END_REGEX = "(?!.*1)";
     private final static String PART_WITH_FIRST_NUMBER_ONE_INCLUSIVE_REGEX = "^([^1]+)1";
     private final static String BYTECODE_LINEFEED = "11";
@@ -11,39 +23,29 @@ public class UTMEncoder
     private final static String INPUT_SEPARATOR_INCLUSIVE_INPUT_REGEX = "1{3}(.*)";
     private final static String TURING_MACHINE_EXCLUSIVE_SEPARATOR_INPUT_REGEX = ".+?(?=111)111";
     private final static String LAST_CHARACTER = "\\\\*.$";
-    private final static String EVERYTHING_EXCEPT_LAST_CHARACTER = ".+?(?=.).";
     private final static char STEP_MODE = '0';
     private final static char RUN_MODE = '1';
+    private final static int RUN_MODE_NO_TAPE_VISUALIZATION = '2';
     private final String byteCode;
     private String remainingTMProperties;
-    private String currentState;
-    private String symbolsToRead;
-    private String nextState;
-    private String symbolsToWrite;
-    private String printHeadDirection;
     private char userInput;
     private int calculationCount = 0;
-    private final String[] tape = new String[62];
+    private final String[] tape = new String[1000000];
+    private final String[] tapeView;
     private Scanner scanner = new Scanner(System.in);
     private final HashMap<Integer, HashMap<String, String>> transitionFunctions = new HashMap<>();
+    private final ArrayList<HashMap<String, String>> test = new ArrayList<>();
+    private final ArrayList<String> acceptingStates;
 
     public UTMEncoder(String byteCode)
     {
+        acceptingStates = new ArrayList<>();
+        acceptingStates.add("q17");
+        acceptingStates.add("q18");
+        acceptingStates.add("q19");
         this.byteCode = byteCode;
-    }
-
-    private int counterForZeros(String symbols)
-    {
-        char[] symbolsArray = symbols.toCharArray();
-        int counter = 0;
-        for (int i = 0; i < symbolsArray.length; i++)
-        {
-            if (symbolsArray[i] == '0')
-            {
-                counter++;
-            }
-        }
-        return counter;
+        initializeTape();
+        tapeView = new String[END_OF_VIEW - START_OF_VIEW + 1];
     }
 
     private String determineSymbols(String symbols)
@@ -56,15 +58,6 @@ public class UTMEncoder
                 break;
             case "00":
                 stringToReturn = "_";
-                break;
-            case "000":
-                stringToReturn = "C";
-                break;
-            case "0000":
-                stringToReturn = "X";
-                break;
-            case "00000":
-                stringToReturn = "Y";
                 break;
             default:
                 stringToReturn = " ";
@@ -119,6 +112,24 @@ public class UTMEncoder
             case "00000000000000":
                 stringToReturn = "q13";
                 break;
+            case "000000000000000":
+                stringToReturn = "q14";
+                break;
+            case "0000000000000000":
+                stringToReturn = "q15";
+                break;
+            case "00000000000000000":
+                stringToReturn = "q16";
+                break;
+            case "000000000000000000":
+                stringToReturn = "q17";
+                break;
+            case "0000000000000000000":
+                stringToReturn = "q18";
+                break;
+            case "00000000000000000000":
+                stringToReturn = "q19";
+                break;
             default:
                 stringToReturn = " ";
         }
@@ -128,16 +139,15 @@ public class UTMEncoder
     private void run()
     {
         userInput = selectMode();
-        initializeTape();
         if (isBytecodeBinary())
         {
             System.out.println(
                     "-------------------------------------------------------------------------------------------");
             StringBuilder transitionFunction = new StringBuilder();
-            currentState = "";
-            symbolsToRead = "";
-            nextState = "";
-            symbolsToWrite = "";
+            String currentState = "";
+            String symbolsToRead = "";
+            String nextState = "";
+            String symbolsToWrite = "";
             int currentTransition = 0;
 
             String[] transitionFunctionByteCodes;
@@ -156,8 +166,7 @@ public class UTMEncoder
                     nextState = removeSeparatorSymbol(disassembleTransition(remainingTMProperties));
                     symbolsToWrite = removeSeparatorSymbol(disassembleTransition(remainingTMProperties));
                 }
-                printHeadDirection = readPrintHeadDirection(transitionFunctionByteCode);
-                printInfo(transitionFunctionByteCode);
+                String printHeadDirection = readPrintHeadDirection(transitionFunctionByteCode);
                 transitionFunction.append("(")
                         .append(determineState(currentState))
                         .append(",")
@@ -170,18 +179,16 @@ public class UTMEncoder
                         .append(printHeadDirection)
                         .append(")" + "\n");
 
-                System.out.println(
-                        "-------------------------------------------------------------------------------------------");
-
                 tmProperties.put("currentState", determineState(currentState));
                 tmProperties.put("symbolsToRead", determineSymbols(symbolsToRead));
                 tmProperties.put("nextState", determineState(nextState));
                 tmProperties.put("symbolsToWrite", determineSymbols(symbolsToWrite));
                 tmProperties.put("printHeadDirection", printHeadDirection);
                 transitionFunctions.put(currentTransition++, tmProperties);
+                test.add(tmProperties);
             }
-            System.out.println("Transition function: " + "\n" + transitionFunction + "\n" + "Tape visualization: ");
-            calculateInput();
+            System.out.println("Transition function: " + "\n" + transitionFunction);
+            System.out.println("Result of multiplication: "+calculateInput());
             System.out.println("Number of calculations: " + calculationCount);
         }
         else
@@ -194,13 +201,6 @@ public class UTMEncoder
     {
         String formattedByteCodeWithoutInput = formattedByteCode.replaceAll(INPUT_SEPARATOR_INCLUSIVE_INPUT_REGEX, "");
         return formattedByteCodeWithoutInput.split(BYTECODE_LINEFEED);
-    }
-
-    private void printInfo(String separatedByteCode)
-    {
-        System.out.println("transitionFunctionByteCode: " + separatedByteCode + "\n" + "currentState: " + currentState + "\n" +
-                "symbolsToRead: " + symbolsToRead + "\n" + "nextState: " + nextState + "\n" + "symbolsToWrite: " + symbolsToWrite +
-                "\n" + "printHeadDirection: " + printHeadDirection);
     }
 
     private String removeFirstChar()
@@ -217,28 +217,29 @@ public class UTMEncoder
         }
     }
 
-    private void calculateInput()
+    private int calculateInput()
     {
+        int multiplicationResult = 0;
         int currentBandPosition = CENTER_INDEX_OF_BAND;
         boolean calculationDone = false;
-
         initializeStartState();
-        System.out.println(Arrays.toString(tape));
-
-        while (!calculationDone)
+        if (!(userInput == RUN_MODE_NO_TAPE_VISUALIZATION))
         {
-            Iterator<Map.Entry<Integer, HashMap<String, String>>> iterator = transitionFunctions.entrySet().iterator();
-            while (iterator.hasNext())
+            System.arraycopy(tape,START_OF_VIEW,tapeView,0,tapeView.length);
+            System.out.println("Tape visualization: "+"\n"+Arrays.toString(tapeView));
+        }
+
+       while (!calculationDone)
+        {
+            for (HashMap<String, String> transition : test)
             {
-                for (Map.Entry<Integer, HashMap<String, String>> transition : transitionFunctions.entrySet())
+                if ((Character.toString(tape[currentBandPosition].charAt(tape[currentBandPosition].length() - 1))
+                        .equals(transition.get("symbolsToRead"))) && tape[currentBandPosition].replaceAll(LAST_CHARACTER, "")
+                        .equals(transition.get("currentState")))
                 {
-                    if ((Character.toString(tape[currentBandPosition].charAt(tape[currentBandPosition].length()-1))
-                            .equals(transition.getValue().get("symbolsToRead")))
-                            && tape[currentBandPosition].replaceAll(LAST_CHARACTER, "")
-                            .equals(transition.getValue().get("currentState")))
                     {
-                        tape[currentBandPosition] = transition.getValue().get("symbolsToWrite");
-                        if (transition.getValue().get("printHeadDirection").equals("R"))
+                        tape[currentBandPosition] = transition.get("symbolsToWrite");
+                        if (transition.get("printHeadDirection").equals("R"))
                         {
                             currentBandPosition++;
                         }
@@ -246,24 +247,48 @@ public class UTMEncoder
                         {
                             currentBandPosition--;
                         }
-                        tape[currentBandPosition] = transition.getValue().get("nextState") + tape[currentBandPosition];
-                        System.out.println(Arrays.toString(tape));
-                        calculationCount++;
-                        if(userInput == STEP_MODE)
+                        tape[currentBandPosition] = transition.get("nextState") + tape[currentBandPosition];
+                        if (!(userInput == RUN_MODE_NO_TAPE_VISUALIZATION))
                         {
-                          System.out.println("Press any key and ENTER to continue the calculation...");
+                            System.arraycopy(tape,START_OF_VIEW,tapeView,0,tapeView.length);
+                            System.out.println(Arrays.toString(tapeView));
+                        }
+                        calculationCount++;
+                        if(isNextStateAcceptingState(transition))
+                        {
+                            for (int currentTapeIndex = 0; currentTapeIndex < tape.length;currentTapeIndex++)
+                            {
+                                if (Array.get(tape,currentTapeIndex).equals("0"))
+                                {
+                                    multiplicationResult++;
+                                }
+                            }
+                            calculationDone = true;
+                        }
+                        if (userInput == STEP_MODE)
+                        {
+                            System.out.println("Press any key and ENTER to continue the calculation...");
                             scanner = new Scanner(System.in);
                             scanner.next().charAt(0);
                         }
                     }
-                    else
-                    {
-                        calculationDone = true;
-                    }
                 }
-                iterator.next();
             }
         }
+       return multiplicationResult;
+    }
+
+    private boolean isNextStateAcceptingState(HashMap<String, String> transition)
+    {
+        boolean isAtAcceptingState = false;
+        for (String acceptingState : acceptingStates)
+        {
+            if(transition.get("nextState").equals(acceptingState))
+            {
+                isAtAcceptingState = true;
+            }
+        }
+        return isAtAcceptingState;
     }
 
     private void initializeTape()
@@ -306,13 +331,14 @@ public class UTMEncoder
         boolean modeSelected = false;
 
         System.out.println("""
-                Select the mode to run the calculations. Possible mods are:
-                0: Step-Mode
-                1: Run-Mode""");
+                        Select the mode to run the calculations. Possible mods are:
+                        0: Step-Mode
+                        1: Run-Mode
+                        2: Run-Mode (no tape visualization)""");
         while (!modeSelected)
         {
             char input = scanner.next().charAt(0);
-            if (input == STEP_MODE || input == RUN_MODE)
+            if (input == STEP_MODE || input == RUN_MODE || input == RUN_MODE_NO_TAPE_VISUALIZATION)
             {
                 inputToReturn = input;
                 modeSelected = true;
@@ -323,7 +349,8 @@ public class UTMEncoder
                 System.out.println("""
                         Select the mode to run the calculations. Possible mods are:
                         0: Step-Mode
-                        1: Run-Mode""");
+                        1: Run-Mode
+                        2: Run-Mode (no tape visualization)""");
             }
         }
         return inputToReturn;
